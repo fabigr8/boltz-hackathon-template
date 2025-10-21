@@ -7,6 +7,7 @@ import subprocess
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, List, Optional
+import copy
 
 import yaml
 from hackathon_api import Datapoint, Protein, SmallMolecule
@@ -61,24 +62,14 @@ def prepare_protein_ligand(datapoint_id: str, protein: Protein, ligands: list[Sm
     Returns:
         List of tuples of (final input dict that will get exported as YAML, list of CLI args). Each tuple represents a separate configuration to run.
     """
-    # Please note:
-    # `protein` is a single-chain target protein sequence with id A
-    # `ligands` contains a single small molecule ligand object with unknown binding sites
-    # you can modify input_dict to change the input yaml file going into the prediction, e.g.
-    # ```
-    # input_dict["constraints"] = [{
-    #   "contact": {
-    #       "token1" : [CHAIN_ID, RES_IDX/ATOM_NAME], 
-    #       "token1" : [CHAIN_ID, RES_IDX/ATOM_NAME]
-    #   }
-    # }]
-    # ```
-    #
-    # will add contact constraints to the input_dict
+    input_dict_base = copy.deepcopy(input_dict)
+    cli_args_base = "--diffusion_samples 50 --use_potentials".split()
 
-    # Example: predict 5 structures
-    cli_args = ["--diffusion_samples", "5"]
-    return [(input_dict, cli_args)]
+    input_dict_highsampl_msasub = copy.deepcopy(input_dict)
+    cli_args_highsampl_msasub = "--diffusion_samples 100 --subsample_msa".split()
+
+    return [(input_dict_base, cli_args_base), (input_dict_highsampl_msasub, cli_args_highsampl_msasub)]
+
 
 def post_process_protein_complex(datapoint: Datapoint, input_dicts: List[dict[str, Any]], cli_args_list: List[list[str]], prediction_dirs: List[Path]) -> List[Path]:
     """
@@ -101,6 +92,7 @@ def post_process_protein_complex(datapoint: Datapoint, input_dicts: List[dict[st
     all_pdbs = sorted(all_pdbs)
     return all_pdbs
 
+
 def post_process_protein_ligand(datapoint: Datapoint, input_dicts: List[dict[str, Any]], cli_args_list: List[list[str]], prediction_dirs: List[Path]) -> List[Path]:
     """
     Return ranked model files for protein-ligand submission.
@@ -115,7 +107,13 @@ def post_process_protein_ligand(datapoint: Datapoint, input_dicts: List[dict[str
     # Collect all PDBs from all configurations
     all_pdbs = []
     for prediction_dir in prediction_dirs:
-        config_pdbs = sorted(prediction_dir.glob(f"{datapoint.datapoint_id}_config_*_model_*.pdb"))
+        if datapoint.ground_truth["ligand_types"][0]["type"] == 'orthosteric':
+            config_base = 0
+        elif datapoint.ground_truth["ligand_types"][0]["type"] == 'allosteric':
+            config_base = 1
+        else:
+            config_base = 1
+        config_pdbs = sorted(prediction_dir.glob(f"{datapoint.datapoint_id}_config_{config_base}_model_*.pdb"))
         all_pdbs.extend(config_pdbs)
     
     # Sort all PDBs and return their paths
